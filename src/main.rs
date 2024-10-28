@@ -1,6 +1,12 @@
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fs;
 use std::io::{self, Write};
+use std::path::Path;
 
+const STORAGE_FILE: &str = "todo_list.json";
+
+#[derive(Serialize, Deserialize)]
 struct TodoList {
     tasks: HashMap<u32, String>,
     next_id: u32,
@@ -8,21 +14,47 @@ struct TodoList {
 
 impl TodoList {
     fn new() -> TodoList {
+        if Path::new(STORAGE_FILE).exists() {
+            match TodoList::load_from_file() {
+                Ok(todo_list) => return todo_list,
+                Err(e) => {
+                    eprintln!("Error loading from file: {}. Starting with empty list.", e);
+                }
+            }
+        }
+        
         TodoList {
             tasks: HashMap::new(),
             next_id: 1,
         }
     }
 
-    fn add_task(&mut self, description: String) -> u32 {
+    fn load_from_file() -> Result<TodoList, Box<dyn std::error::Error>> {
+        let file_content = fs::read_to_string(STORAGE_FILE)?;
+        let todo_list: TodoList = serde_json::from_str(&file_content)?;
+        Ok(todo_list)
+    }
+
+    fn save_to_file(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let json = serde_json::to_string_pretty(self)?;
+        fs::write(STORAGE_FILE, json)?;
+        Ok(())
+    }
+
+    fn add_task(&mut self, description: String) -> Result<u32, Box<dyn std::error::Error>> {
         let id = self.next_id;
         self.tasks.insert(id, description);
         self.next_id += 1;
-        id
+        self.save_to_file()?;
+        Ok(id)
     }
 
-    fn remove_task(&mut self, id: u32) -> bool {
-        self.tasks.remove(&id).is_some()
+    fn remove_task(&mut self, id: u32) -> Result<bool, Box<dyn std::error::Error>> {
+        let task_removed = self.tasks.remove(&id).is_some();
+        if task_removed {
+            self.save_to_file()?;
+        }
+        Ok(task_removed)
     }
 
     fn list_tasks(&self) {
@@ -58,8 +90,10 @@ fn main() {
                 io::stdout().flush().unwrap();
                 let mut description = String::new();
                 io::stdin().read_line(&mut description).unwrap();
-                let id = todo_list.add_task(description.trim().to_string());
-                println!("Task added with ID: {}", id);
+                match todo_list.add_task(description.trim().to_string()) {
+                    Ok(id) => println!("Task added with ID: {}", id),
+                    Err(e) => println!("Error adding task: {}", e),
+                }
             }
             "2" => {
                 print!("Enter task ID to remove: ");
@@ -67,10 +101,10 @@ fn main() {
                 let mut id_str = String::new();
                 io::stdin().read_line(&mut id_str).unwrap();
                 if let Ok(id) = id_str.trim().parse::<u32>() {
-                    if todo_list.remove_task(id) {
-                        println!("Task removed successfully!");
-                    } else {
-                        println!("Task not found!");
+                    match todo_list.remove_task(id) {
+                        Ok(true) => println!("Task removed successfully!"),
+                        Ok(false) => println!("Task not found!"),
+                        Err(e) => println!("Error removing task: {}", e),
                     }
                 } else {
                     println!("Invalid ID!");
